@@ -28,6 +28,9 @@ type Server struct {
 
 	grpcSrv *grpc.Server
 	httpSrv *http.Server
+	grpcLis net.Listener
+	httpLis net.Listener
+	errCh   chan error
 }
 
 // NewServer constructs the receiver. Addresses are host:port (e.g. ":4317").
@@ -51,47 +54,69 @@ func (g *grpcService) Export(ctx context.Context, req *coltracepb.ExportTraceSer
 	return &coltracepb.ExportTraceServiceResponse{}, nil
 }
 
-// ListenAndServe starts both listeners and blocks until ctx is cancelled or a
-// listener fails fatally, then shuts down gracefully.
-func (s *Server) ListenAndServe(ctx context.Context) error {
-	lis, err := net.Listen("tcp", s.grpcAddr)
+// Start binds both listeners and begins serving in background goroutines. It
+// returns once the sockets are bound, so callers (and tests) can immediately
+// reach the receiver at Addrs(). Use ListenAndServe for the blocking variant.
+func (s *Server) Start() error {
+	grpcLis, err := net.Listen("tcp", s.grpcAddr)
 	if err != nil {
 		return fmt.Errorf("listen gRPC %s: %w", s.grpcAddr, err)
 	}
+	httpLis, err := net.Listen("tcp", s.httpAddr)
+	if err != nil {
+		_ = grpcLis.Close()
+		return fmt.Errorf("listen HTTP %s: %w", s.httpAddr, err)
+	}
+	s.grpcLis, s.httpLis = grpcLis, httpLis
 
 	s.grpcSrv = grpc.NewServer()
 	coltracepb.RegisterTraceServiceServer(s.grpcSrv, &grpcService{proc: s.proc})
+	s.httpSrv = &http.Server{Handler: s.httpMux(), ReadHeaderTimeout: 10 * time.Second}
 
-	s.httpSrv = &http.Server{
-		Addr:              s.httpAddr,
-		Handler:           s.httpMux(),
-		ReadHeaderTimeout: 10 * time.Second,
+	s.errCh = make(chan error, 2)
+	go func() {
+		s.log.Info("OTLP gRPC receiver listening", "addr", grpcLis.Addr().String())
+		if err := s.grpcSrv.Serve(grpcLis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+			s.errCh <- fmt.Errorf("gRPC serve: %w", err)
+		}
+	}()
+	go func() {
+		s.log.Info("OTLP HTTP receiver listening", "addr", httpLis.Addr().String())
+		if err := s.httpSrv.Serve(httpLis); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			s.errCh <- fmt.Errorf("HTTP serve: %w", err)
+		}
+	}()
+	return nil
+}
+
+// Addrs returns the bound gRPC and HTTP addresses (valid after Start).
+func (s *Server) Addrs() (grpcAddr, httpAddr string) {
+	if s.grpcLis != nil {
+		grpcAddr = s.grpcLis.Addr().String()
 	}
+	if s.httpLis != nil {
+		httpAddr = s.httpLis.Addr().String()
+	}
+	return
+}
 
-	errCh := make(chan error, 2)
-	go func() {
-		s.log.Info("OTLP gRPC receiver listening", "addr", s.grpcAddr)
-		if err := s.grpcSrv.Serve(lis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
-			errCh <- fmt.Errorf("gRPC serve: %w", err)
-		}
-	}()
-	go func() {
-		s.log.Info("OTLP HTTP receiver listening", "addr", s.httpAddr)
-		if err := s.httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- fmt.Errorf("HTTP serve: %w", err)
-		}
-	}()
-
+// ListenAndServe starts both listeners and blocks until ctx is cancelled or a
+// listener fails fatally, then shuts down gracefully.
+func (s *Server) ListenAndServe(ctx context.Context) error {
+	if err := s.Start(); err != nil {
+		return err
+	}
 	select {
 	case <-ctx.Done():
-		return s.shutdown()
-	case err := <-errCh:
-		_ = s.shutdown()
+		return s.Shutdown()
+	case err := <-s.errCh:
+		_ = s.Shutdown()
 		return err
 	}
 }
 
-func (s *Server) shutdown() error {
+// Shutdown gracefully stops both servers.
+func (s *Server) Shutdown() error {
 	if s.grpcSrv != nil {
 		s.grpcSrv.GracefulStop()
 	}

@@ -23,6 +23,7 @@ func NewRootCmd() *cobra.Command {
 		newServeCmd(),
 		newRunsCmd(),
 		newConfigCmd(),
+		newReplayCmd(),
 	)
 	return root
 }

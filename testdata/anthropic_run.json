@@ -1,0 +1,63 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "research-assistant" } },
+          { "key": "gen_ai.system", "value": { "stringValue": "anthropic" } }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": { "name": "openinference" },
+          "spans": [
+            {
+              "traceId": "YW50aHJvcGljLXRyYTAwMQ==",
+              "spanId": "YW4tYWdlbnQ=",
+              "name": "invoke_agent research-assistant",
+              "startTimeUnixNano": "1700000100000000000",
+              "endTimeUnixNano": "1700000102200000000",
+              "attributes": [
+                { "key": "gen_ai.operation.name", "value": { "stringValue": "invoke_agent" } },
+                { "key": "gen_ai.agent.name", "value": { "stringValue": "research-assistant" } }
+              ]
+            },
+            {
+              "traceId": "YW50aHJvcGljLXRyYTAwMQ==",
+              "spanId": "YW4tY2hhdDE=",
+              "parentSpanId": "YW4tYWdlbnQ=",
+              "name": "chat claude-3-5-sonnet",
+              "startTimeUnixNano": "1700000100100000000",
+              "endTimeUnixNano": "1700000101200000000",
+              "attributes": [
+                { "key": "gen_ai.operation.name", "value": { "stringValue": "chat" } },
+                { "key": "gen_ai.request.model", "value": { "stringValue": "claude-3-5-sonnet-20241022" } },
+                { "key": "gen_ai.usage.input_tokens", "value": { "intValue": "820" } },
+                { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "110" } },
+                { "key": "gen_ai.response.finish_reasons", "value": { "stringValue": "tool_use" } },
+                { "key": "gen_ai.request.system_instructions", "value": { "stringValue": "You are a research assistant. Prefer primary sources. When you use the web_search tool, summarize each result with its URL." } },
+                { "key": "gen_ai.request.tools", "value": { "stringValue": "[{\"name\":\"web_search\",\"description\":\"Search the web for a query and return the top results\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"},\"recency_days\":{\"type\":\"integer\"}},\"required\":[\"query\"]}}]" } },
+                { "key": "gen_ai.request.messages", "value": { "stringValue": "[{\"role\":\"user\",\"content\":\"Find the three most-cited papers on retrieval-augmented generation from 2024 and summarize each.\"}]" } },
+                { "key": "gen_ai.response.text", "value": { "stringValue": "" } }
+              ]
+            },
+            {
+              "traceId": "YW50aHJvcGljLXRyYTAwMQ==",
+              "spanId": "YW4tdG9vbDE=",
+              "parentSpanId": "YW4tY2hhdDE=",
+              "name": "execute_tool web_search",
+              "startTimeUnixNano": "1700000101250000000",
+              "endTimeUnixNano": "1700000102150000000",
+              "attributes": [
+                { "key": "gen_ai.operation.name", "value": { "stringValue": "execute_tool" } },
+                { "key": "gen_ai.tool.name", "value": { "stringValue": "web_search" } },
+                { "key": "gen_ai.tool.call.arguments", "value": { "stringValue": "{\"query\":\"most cited retrieval augmented generation papers 2024\",\"recency_days\":400}" } }
+              ],
+              "status": { "code": "STATUS_CODE_ERROR", "message": "search backend timed out after 900ms" }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
