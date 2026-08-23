@@ -1,0 +1,18 @@
+# Binaries
+/agentxray
+/agentxray.exe
+/axray
+/axray.exe
+/bin/
+
+# Local databases
+*.db
+*.db-wal
+*.db-shm
+
+# Local config (keep the example checked in)
+/agentxray.yaml
+
+# OS / editor
+.DS_Store
+*.swp

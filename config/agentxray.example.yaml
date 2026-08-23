@@ -1,0 +1,23 @@
+# AgentXRay example configuration (v0.1)
+# All fields are optional; shown values are the defaults.
+
+# OTLP receiver listen addresses.
+otlp:
+  grpc: ":4317"   # standard OTel Collector gRPC port
+  http: ":4318"   # standard OTel Collector HTTP/protobuf port
+
+# Storage.
+db:
+  path: "agentxray.db"
+
+# Ingestion behavior.
+ingest:
+  # Store tool-call arguments and results. Disable to avoid persisting
+  # potentially sensitive payloads.
+  capture_content: true
+
+# Tokenizer used to *split* provider-reported totals into categories.
+# Provider-reported gen_ai.usage.* totals are always preferred when present;
+# this encoding is only used for the per-category split (labeled "estimated").
+tokenizer:
+  encoding: "cl100k_base"
