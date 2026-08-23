@@ -3,11 +3,14 @@ module github.com/pwn1609/AgentXRay
 go 1.25.7
 
 require (
+	github.com/pkoukk/tiktoken-go v0.1.8
+	github.com/pkoukk/tiktoken-go-loader v0.0.2
 	github.com/spf13/cobra v1.10.2
 	modernc.org/sqlite v1.57.0
 )
 
 require (
+	github.com/dlclark/regexp2 v1.10.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
