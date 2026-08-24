@@ -123,11 +123,24 @@ func (s *Store) SaveRun(ctx context.Context, r *model.Run) error {
 				run_id=excluded.run_id, llm_call_id=excluded.llm_call_id, tool_name=excluded.tool_name,
 				arguments=excluded.arguments, result=excluded.result, started_at=excluded.started_at,
 				duration_ms=excluded.duration_ms, status=excluded.status, failure_detail=excluded.failure_detail`,
-			c.ID, r.ID, c.LLMCallID, c.ToolName, rawOrNil(c.Arguments), rawOrNil(c.Result),
+			c.ID, r.ID, nullStr(c.LLMCallID), c.ToolName, rawOrNil(c.Arguments), rawOrNil(c.Result),
 			millis(c.StartedAt), c.DurationMs, c.Status, c.FailureDetail,
 		); err != nil {
 			return fmt.Errorf("upsert tool_call %s: %w", c.ID, err)
 		}
+	}
+
+	// Make the stored run-level total authoritative: recompute it from all LLM
+	// calls now attached to the run. This keeps `runs list` correct even when a
+	// trace's spans arrive across multiple export batches. Runs with no LLM calls
+	// (tool-only) keep the total provided above.
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE runs SET total_tokens = (
+			SELECT COALESCE(SUM(total_tokens), 0) FROM llm_calls WHERE run_id = ?
+		) WHERE id = ? AND EXISTS (SELECT 1 FROM llm_calls WHERE run_id = ?)`,
+		r.ID, r.ID, r.ID,
+	); err != nil {
+		return fmt.Errorf("recompute run total %s: %w", r.ID, err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -234,11 +247,12 @@ func (s *Store) toolCallsForRun(ctx context.Context, runID string) ([]model.Tool
 	for rows.Next() {
 		var c model.ToolCall
 		var startedAt int64
-		var args, result sql.NullString
-		if err := rows.Scan(&c.ID, &c.RunID, &c.LLMCallID, &c.ToolName, &args, &result,
+		var args, result, llmCallID sql.NullString
+		if err := rows.Scan(&c.ID, &c.RunID, &llmCallID, &c.ToolName, &args, &result,
 			&startedAt, &c.DurationMs, &c.Status, &c.FailureDetail); err != nil {
 			return nil, fmt.Errorf("scan tool_call: %w", err)
 		}
+		c.LLMCallID = llmCallID.String
 		c.StartedAt = fromMillis(startedAt)
 		if args.Valid {
 			c.Arguments = json.RawMessage(args.String)
@@ -287,4 +301,12 @@ func rawOrNil(r json.RawMessage) any {
 		return nil
 	}
 	return string(r)
+}
+
+// nullStr binds empty strings as SQL NULL (used for optional foreign keys).
+func nullStr(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }

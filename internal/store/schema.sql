@@ -30,7 +30,10 @@ CREATE TABLE IF NOT EXISTS llm_calls (
 CREATE TABLE IF NOT EXISTS tool_calls (
     id             TEXT PRIMARY KEY,
     run_id         TEXT REFERENCES runs(id),
-    llm_call_id    TEXT REFERENCES llm_calls(id),
+    -- No FK on llm_call_id: a tool call's triggering span may be a non-chat span
+    -- (e.g. the agent span) or may arrive out of order, so it is not guaranteed
+    -- to reference a recorded llm_calls row. Stored NULL when unknown.
+    llm_call_id    TEXT,
     tool_name      TEXT,
     arguments      TEXT, -- JSON
     result         TEXT, -- JSON
