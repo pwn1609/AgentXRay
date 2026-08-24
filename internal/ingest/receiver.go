@@ -45,13 +45,28 @@ func NewServer(grpcAddr, httpAddr string, proc *Processor, log *slog.Logger) *Se
 type grpcService struct {
 	coltracepb.UnimplementedTraceServiceServer
 	proc *Processor
+	log  *slog.Logger
 }
 
 func (g *grpcService) Export(ctx context.Context, req *coltracepb.ExportTraceServiceRequest) (*coltracepb.ExportTraceServiceResponse, error) {
+	g.log.Info("OTLP export received", "transport", "grpc",
+		"resource_spans", len(req.GetResourceSpans()), "spans", countSpans(req))
 	if err := g.proc.ConsumeTraces(ctx, req); err != nil {
+		g.log.Error("OTLP export failed", "transport", "grpc", "err", err)
 		return nil, err
 	}
 	return &coltracepb.ExportTraceServiceResponse{}, nil
+}
+
+// countSpans returns the total number of spans across all resource/scope spans.
+func countSpans(req *coltracepb.ExportTraceServiceRequest) int {
+	n := 0
+	for _, rs := range req.GetResourceSpans() {
+		for _, ss := range rs.GetScopeSpans() {
+			n += len(ss.GetSpans())
+		}
+	}
+	return n
 }
 
 // Start binds both listeners and begins serving in background goroutines. It
@@ -70,7 +85,7 @@ func (s *Server) Start() error {
 	s.grpcLis, s.httpLis = grpcLis, httpLis
 
 	s.grpcSrv = grpc.NewServer()
-	coltracepb.RegisterTraceServiceServer(s.grpcSrv, &grpcService{proc: s.proc})
+	coltracepb.RegisterTraceServiceServer(s.grpcSrv, &grpcService{proc: s.proc, log: s.log})
 	s.httpSrv = &http.Server{Handler: s.httpMux(), ReadHeaderTimeout: 10 * time.Second}
 
 	s.errCh = make(chan error, 2)
@@ -137,11 +152,15 @@ func (s *Server) httpMux() http.Handler {
 // handleTraces accepts OTLP/HTTP trace exports (protobuf or JSON) on /v1/traces.
 func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
+		s.log.Warn("OTLP HTTP request rejected", "reason", "method not allowed",
+			"method", r.Method, "remote", r.RemoteAddr)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 32<<20)) // 32 MiB cap
 	if err != nil {
+		s.log.Warn("OTLP HTTP request rejected", "reason", "read body",
+			"remote", r.RemoteAddr, "err", err)
 		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -156,11 +175,18 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		err = proto.Unmarshal(body, req)
 	}
 	if err != nil {
+		s.log.Warn("OTLP HTTP request rejected", "reason", "decode OTLP",
+			"content_type", ct, "bytes", len(body), "remote", r.RemoteAddr, "err", err)
 		http.Error(w, "decode OTLP: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
+	s.log.Info("OTLP export received", "transport", "http", "content_type", ct,
+		"bytes", len(body), "resource_spans", len(req.GetResourceSpans()),
+		"spans", countSpans(req), "remote", r.RemoteAddr)
+
 	if err := s.proc.ConsumeTraces(r.Context(), req); err != nil {
+		s.log.Error("OTLP export failed", "transport", "http", "err", err)
 		http.Error(w, "process: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

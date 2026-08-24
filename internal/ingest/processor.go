@@ -62,12 +62,19 @@ func (p *Processor) ConsumeTraces(ctx context.Context, req *coltracepb.ExportTra
 		}
 	}
 
+	p.log.Debug("grouped spans into traces", "traces", len(byTrace))
+
 	var firstErr error
 	for tid, spans := range byTrace {
 		run := p.assembleRun(tid, spans)
 		if run == nil {
+			p.log.Info("trace dropped", "run", tid, "spans", len(spans),
+				"reason", "no gen_ai spans (no chat/tool/invoke_agent)")
 			continue
 		}
+		p.log.Debug("run assembled", "run", tid, "agent", run.AgentName,
+			"llm_calls", len(run.LLMCalls), "tool_calls", len(run.ToolCalls),
+			"total_tokens", run.TotalTokens.Total, "status", run.Status)
 		if err := p.sink.SaveRun(ctx, run); err != nil {
 			p.log.Error("save run failed", "run", tid, "err", err)
 			if firstErr == nil {
@@ -121,6 +128,8 @@ func (p *Processor) assembleRun(traceID string, spans []spanWithResource) *model
 			run.ToolCalls = append(run.ToolCalls, toolCallFromSpan(traceID, s, p.captureContent))
 		default:
 			// Non-GenAI span in this trace; ignored (we are a specialized consumer).
+			p.log.Debug("span ignored", "run", traceID, "span", s.Name,
+				"operation", operationOf(s), "reason", "not a gen_ai chat/tool/invoke_agent span")
 		}
 	}
 
