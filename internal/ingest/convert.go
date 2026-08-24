@@ -3,6 +3,7 @@ package ingest
 import (
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/pwn1609/AgentXRay/internal/model"
@@ -48,8 +49,9 @@ func llmCallFromSpan(runID string, s *tracepb.Span, c *tokenize.Counter) (model.
 	v := newAttrView(s.Attributes)
 	start, _, durMs := spanTimes(s)
 
-	payload := payloadFromChat(v)
+	payload, warnings := payloadFromChat(v)
 	br, diag := tokenize.Categorize(payload, c)
+	warnings = append(warnings, diag.Warnings...)
 
 	return model.LLMCall{
 		ID:             hexID(s.SpanId),
@@ -60,11 +62,13 @@ func llmCallFromSpan(runID string, s *tracepb.Span, c *tokenize.Counter) (model.
 		DurationMs:     durMs,
 		FinishReason:   v.str(attrFinishReason),
 		TokenBreakdown: br,
-	}, diag.Warnings
+	}, warnings
 }
 
 // payloadFromChat builds a transport-independent tokenize.Payload from a chat span.
-func payloadFromChat(v attrView) tokenize.Payload {
+// It returns warnings for any span content that could not be parsed and was
+// therefore silently excluded from categorization.
+func payloadFromChat(v attrView) (tokenize.Payload, []string) {
 	p := tokenize.Payload{
 		Model:                v.str(attrModel),
 		System:               v.str(attrSystemPrompt),
@@ -72,13 +76,18 @@ func payloadFromChat(v attrView) tokenize.Payload {
 		ProviderOutputTokens: v.intVal(attrOutputTokens),
 		ResponseText:         v.str(attrResponseText),
 	}
+	var warnings []string
 	if raw := v.str(attrToolDefs); raw != "" {
 		p.Tools = parseToolDefs(raw)
 	}
 	if raw := v.str(attrMessages); raw != "" {
-		p.Messages = parseMessages(raw)
+		msgs, ok := parseMessages(raw)
+		if !ok {
+			warnings = append(warnings, fmt.Sprintf("messages attribute is not valid JSON (%d bytes); conversation tokens undercounted", len(raw)))
+		}
+		p.Messages = msgs
 	}
-	return p
+	return p, warnings
 }
 
 // toolCallFromSpan converts an `execute_tool` span into a ToolCall. When
@@ -144,13 +153,13 @@ func toolNameOf(item json.RawMessage) string {
 
 // parseMessages unmarshals a JSON array of {role, content} into tokenize.Message.
 // Content may be a JSON string or a structured block; both are reduced to text.
-func parseMessages(raw string) []tokenize.Message {
+func parseMessages(raw string) ([]tokenize.Message, bool) {
 	var arr []struct {
 		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content"`
 	}
 	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
-		return nil
+		return nil, false
 	}
 	out := make([]tokenize.Message, 0, len(arr))
 	for _, m := range arr {
@@ -159,7 +168,7 @@ func parseMessages(raw string) []tokenize.Message {
 			Content: contentToText(m.Content),
 		})
 	}
-	return out
+	return out, true
 }
 
 func contentToText(raw json.RawMessage) string {

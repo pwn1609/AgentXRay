@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -23,8 +24,13 @@ func newServeCmd() *cobra.Command {
 			dbPath, _ := cmd.Flags().GetString("db")
 			encoding, _ := cmd.Flags().GetString("encoding")
 			capture, _ := cmd.Flags().GetBool("capture-content")
+			logLevel, _ := cmd.Flags().GetString("log-level")
 
-			log := slog.New(slog.NewTextHandler(cmd.OutOrStdout(), &slog.HandlerOptions{Level: slog.LevelInfo}))
+			var lvl slog.Level
+			if err := lvl.UnmarshalText([]byte(logLevel)); err != nil {
+				return fmt.Errorf("invalid --log-level %q (use debug|info|warn|error): %w", logLevel, err)
+			}
+			log := slog.New(slog.NewTextHandler(cmd.OutOrStdout(), &slog.HandlerOptions{Level: lvl}))
 
 			st, err := store.Open(dbPath)
 			if err != nil {
@@ -56,5 +62,6 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().String("db", "agentxray.db", "SQLite database file path")
 	cmd.Flags().String("encoding", tokenize.DefaultEncoding, "tokenizer encoding for category splitting")
 	cmd.Flags().Bool("capture-content", true, "store tool-call arguments and results")
+	cmd.Flags().String("log-level", "info", "log verbosity: debug|info|warn|error (debug logs request contents and dropped spans)")
 	return cmd
 }
